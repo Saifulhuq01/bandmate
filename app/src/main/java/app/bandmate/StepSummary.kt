@@ -91,7 +91,7 @@ object StepSummary {
 
     // --- Phone notification (picked up by Crest and other watch apps) --------------------------
 
-    fun phoneNotifyOn(ctx: Context) = prefs(ctx).getBoolean("phoneNotify", true)
+    fun phoneNotifyOn(ctx: Context) = prefs(ctx).getBoolean("phoneNotify", false)
     fun setPhoneNotifyOn(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("phoneNotify", on).apply()
 
     private const val CHANNEL = "steps"
