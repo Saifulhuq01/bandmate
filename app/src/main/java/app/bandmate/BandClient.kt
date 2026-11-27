@@ -262,6 +262,13 @@ class BandClient(
     }
 
     private suspend fun afterAuth() {
+        // Diagnostic: which operations the band's step counter allows (read/write/notify).
+        find(Uuids.STEPS)?.let { c ->
+            val p = c.properties
+            val names = listOf(0x02 to "read", 0x04 to "write-no-response", 0x08 to "write", 0x10 to "notify", 0x20 to "indicate")
+                .filter { p and it.first != 0 }.joinToString(", ") { it.second }
+            android.util.Log.d("BandMate", "Step counter (0007) allows: $names")
+        }
         syncTime()
         subscribe(Uuids.BATTERY)
         subscribe(Uuids.STEPS)
