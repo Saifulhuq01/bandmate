@@ -230,7 +230,8 @@ class BandClient(
             }
             Uuids.ACTIVITY_CONTROL -> control.trySend(v)
             Uuids.ACTIVITY_DATA -> onHistoryPacket(v)
-            Uuids.CONFIG -> if (v.size >= 3 && v[2].toInt() != 1) Band.log("Band refused setting: ${Proto.hex(v)}")
+            // Replies echo the command; they are not error codes, so only keep them in logcat.
+            Uuids.CONFIG -> android.util.Log.d("BandMate", "config reply ${Proto.hex(v)}")
             Uuids.DEVICE_EVENT -> when (v.firstOrNull()) {
                 Proto.EVENT_CALL_REJECT -> { Band.log("Reject tapped on band"); Band.onRejectCall?.invoke() }
                 Proto.EVENT_CALL_IGNORE -> Band.log("Ignore tapped on band")
