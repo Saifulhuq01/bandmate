@@ -37,6 +37,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.bandmate.Band
 import app.bandmate.Night
 import app.bandmate.Saved
+import app.bandmate.StepTotals
+import app.bandmate.Steps
 import app.bandmate.Store
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -79,12 +81,13 @@ private fun StepsHistory() {
         Span.MONTH -> anchor.withDayOfMonth(1)
     }
     val count = when (span) { Span.DAY -> 24; Span.WEEK -> 7; Span.MONTH -> first.lengthOfMonth() }
-    val values by produceState(List(count) { 0 }, span, first, version) {
-        value = withContext(Dispatchers.IO) {
-            val s = Store.get(ctx)
-            if (span == Span.DAY) s.stepsByHour(first).toList() else s.stepsByDay(first, count).toList()
-        }
+    val totals by produceState(List(count) { StepTotals(0, 0, 0) }, span, first, version) {
+        value = if (span == Span.DAY) {
+            val (b, p, m) = Steps.hoursOf(ctx, first)
+            List(24) { StepTotals(b[it], p[it], m[it]) }
+        } else Steps.daysOf(ctx, first, count)
     }
+    val values = totals.map { it.merged }
     val labels: List<String?> = when (span) {
         Span.DAY -> List(24) { if (it % 6 == 0) "%02d".format(it) else null }
         Span.WEEK -> List(7) { first.plusDays(it.toLong()).dayOfWeek.name.take(1) }
@@ -113,13 +116,21 @@ private fun StepsHistory() {
                     style = T.Label, modifier = Modifier.padding(bottom = 6.dp),
                 )
             }
+            val part = sel?.let { totals.getOrNull(it) } ?: StepTotals(totals.sumOf { it.band }, totals.sumOf { it.phone }, total)
+            if (part.phone > 0) {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically) { Dot(C.Steps); Spacer(Modifier.width(6.dp)); Text("Band %,d".format(part.band), style = T.Label) }
+                    Row(verticalAlignment = Alignment.CenterVertically) { Dot(C.Sky); Spacer(Modifier.width(6.dp)); Text("Phone %,d".format(part.phone), style = T.Label) }
+                }
+            }
             BarChart(values, C.Steps, selected, { selected = it }, labels = labels, goal = if (span == Span.DAY) null else goal)
             if (span != Span.DAY) {
                 val hit = values.count { it >= goal }
                 Text("Total %,d · goal reached on %d day%s".format(total, hit, if (hit == 1) "" else "s"), style = T.Label)
             }
         }
-        if (total == 0) EmptyHint("No steps stored for this period yet. History builds up each time the band syncs.")
+        if (total == 0) EmptyHint("No steps for this period yet. Band history builds up each time the band syncs; phone steps come from Health Connect.")
+        if (totals.any { it.phone > 0 }) Text("When the band and phone both counted the same hour, the higher count is used — steps are never added twice.", style = T.Small)
     }
 }
 

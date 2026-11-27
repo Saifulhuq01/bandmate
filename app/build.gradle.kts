@@ -44,6 +44,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    // Health Connect: read the phone's step count (Google Fit / OnePlus Health write it there)
+    implementation("androidx.health.connect:connect-client:1.1.0-beta01")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // real org.json for JVM unit tests

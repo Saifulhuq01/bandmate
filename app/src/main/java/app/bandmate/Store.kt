@@ -63,6 +63,17 @@ class Store private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "bandmate.
         return out
     }
 
+    /** Steps in each hour for [hours] hours from the start of [first]. */
+    fun stepsByHourRange(first: LocalDate, hours: Int, zone: ZoneId = ZoneId.systemDefault()): IntArray {
+        val start = dayStartMinute(first, zone)
+        val out = IntArray(hours)
+        readableDatabase.rawQuery(
+            "SELECT (minute - ?) / 60 AS h, SUM(steps) FROM samples WHERE minute >= ? AND minute < ? GROUP BY h",
+            arrayOf(start.toString(), start.toString(), (start + hours * 60L).toString())
+        ).use { c -> while (c.moveToNext()) c.getInt(0).takeIf { it in 0 until hours }?.let { out[it] = c.getInt(1) } }
+        return out
+    }
+
     /** Total steps for each of [days] days starting at [first]. */
     fun stepsByDay(first: LocalDate, days: Int, zone: ZoneId = ZoneId.systemDefault()): IntArray =
         IntArray(days) { i ->

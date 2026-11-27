@@ -29,6 +29,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.health.connect.client.PermissionController
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +53,8 @@ import app.bandmate.Actions
 import app.bandmate.Band
 import app.bandmate.Night
 import app.bandmate.Saved
+import app.bandmate.PhoneSteps
+import app.bandmate.Steps
 import app.bandmate.Store
 import app.bandmate.WeatherApi
 import app.bandmate.WeatherPrefs
@@ -78,6 +88,16 @@ fun TodayScreen(onOpenSleep: () -> Unit, onOpenBand: () -> Unit) {
     }
     val weather = forecast ?: WeatherPrefs.last(ctx)
 
+    // Phone steps (Health Connect), refreshed every minute while this screen is open.
+    var phoneGranted by remember { mutableStateOf<Boolean?>(null) }
+    var askTick by remember { mutableIntStateOf(0) }
+    val askPhone = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { askTick++ }
+    LaunchedEffect(askTick) { phoneGranted = PhoneSteps.granted(ctx) }
+    val tick by produceState(0) { while (true) { delay(60_000); value++ } }
+    val hours by produceState<Triple<IntArray, IntArray, IntArray>?>(null, version, tick, phoneGranted) {
+        value = Steps.hoursOf(ctx, LocalDate.now())
+    }
+
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Header
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -90,7 +110,14 @@ fun TodayScreen(onOpenSleep: () -> Unit, onOpenBand: () -> Unit) {
         ConnectionPill(state, battery?.percent, onClick = onOpenBand)
 
         // Steps hero
-        val steps = activity?.steps ?: 0
+        // The band's live counter is newer than its synced history, so top up the current hour with it.
+        val bandLive = activity?.steps ?: 0
+        val h = hours
+        val bandHours = h?.first?.copyOf() ?: IntArray(24)
+        val gap = bandLive - bandHours.sum()
+        if (gap > 0) bandHours[java.time.LocalTime.now().hour] += gap
+        val phoneSteps = h?.second?.sum() ?: 0
+        val steps = Steps.merge(bandHours, h?.second ?: IntArray(24)).sum()
         val shown by animateIntAsState(steps, tween(900), label = "steps")
         Card(Modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -102,10 +129,34 @@ fun TodayScreen(onOpenSleep: () -> Unit, onOpenBand: () -> Unit) {
                     }
                 }
             }
+            if (phoneSteps > 0) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Dot(C.Steps); Spacer(Modifier.width(6.dp)); Text("Band %,d".format(bandHours.sum()), style = T.Label)
+                    Spacer(Modifier.width(16.dp))
+                    Dot(C.Sky); Spacer(Modifier.width(6.dp)); Text("Phone %,d".format(phoneSteps), style = T.Label)
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MiniStat(Ic.Route, C.Sky, activity?.let { "%.2f".format(it.meters / 1000.0) } ?: "—", "km", Modifier.weight(1f))
                 MiniStat(Ic.Flame, C.Awake, activity?.kcal?.toString() ?: "—", "kcal", Modifier.weight(1f))
                 MiniStat(if (battery?.charging == true) Ic.Bolt else Ic.Battery, C.Text, battery?.percent?.toString() ?: "—", "%", Modifier.weight(1f))
+            }
+        }
+
+        if (phoneGranted == false && PhoneSteps.available(ctx) && PhoneSteps.enabled(ctx)) {
+            Card(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconBadge(Ic.Phone, C.Sky)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Add your phone's steps", style = T.Body)
+                        Text("Counts steps when you're not wearing the band, from Google Fit via Health Connect.", style = T.Label)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryButton("Allow", C.Sky, modifier = Modifier.weight(1f)) { askPhone.launch(PhoneSteps.PERMISSIONS) }
+                    GhostButton("Not now", modifier = Modifier.weight(1f)) { PhoneSteps.setEnabled(ctx, false); askTick++ }
+                }
             }
         }
 

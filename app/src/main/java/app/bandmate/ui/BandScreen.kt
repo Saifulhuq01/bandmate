@@ -140,6 +140,9 @@ fun BandScreen() {
             Segmented(listOf(false to "Left wrist", true to "Right wrist"), settings.rightWrist) { update(settings.copy(rightWrist = it)) }
             ToggleRow("Buzz when phone disconnects", checked = settings.disconnectAlert) { update(settings.copy(disconnectAlert = it)) }
             ToggleRow("Reconnect after phone restart", checked = Band.autoStart(ctx)) { Band.setAutoStart(ctx, it) }
+            ToggleRow("Count phone steps too", "From Google Fit via Health Connect", app.bandmate.PhoneSteps.enabled(ctx), accent = C.Sky) {
+                app.bandmate.PhoneSteps.setEnabled(ctx, it); Band.dataVersion.value++
+            }
         }
         LogCard()
         Spacer(Modifier.height(8.dp))
