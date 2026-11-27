@@ -56,6 +56,7 @@ import app.bandmate.Clock
 import app.bandmate.Cmd
 import app.bandmate.Place
 import app.bandmate.Saved
+import app.bandmate.StepSummary
 import app.bandmate.WeatherApi
 import app.bandmate.WeatherPrefs
 import kotlinx.coroutines.launch
@@ -130,6 +131,9 @@ fun BandScreen() {
                 onMode = { update(settings.copy(dnd = it)) },
                 onStart = { update(settings.copy(dndStart = it)) }, onEnd = { update(settings.copy(dndEnd = it)) })
         }
+
+        SectionHeader("Steps on the band")
+        StepSummaryCard()
 
         SectionHeader("Weather on the band")
         WeatherCard()
@@ -424,5 +428,44 @@ private fun LogCard() {
             Icon(if (open) Ic.Up else Ic.Down, null, tint = C.Muted, modifier = Modifier.size(18.dp))
         }
         if (open) lines.take(40).forEach { Text(it, style = T.Small.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)) }
+    }
+}
+
+// --- Step summaries -----------------------------------------------------------------------
+
+@Composable
+private fun StepSummaryCard() {
+    val ctx = LocalContext.current
+    val state by Band.state.collectAsStateWithLifecycle()
+    var evening by remember { mutableStateOf(StepSummary.eveningOn(ctx)) }
+    var eveningAt by remember { mutableStateOf(StepSummary.eveningTime(ctx)) }
+    var hourly by remember { mutableStateOf(StepSummary.hourlyOn(ctx)) }
+    var bgOk by remember { mutableStateOf<Boolean?>(null) }
+    var bgTick by remember { mutableStateOf(0) }
+    val askBg = rememberLauncherForActivityResult(androidx.health.connect.client.PermissionController.createRequestPermissionResultContract()) { bgTick++ }
+    androidx.compose.runtime.LaunchedEffect(bgTick) { bgOk = StepSummary.backgroundGranted(ctx) }
+
+    Card(Modifier.fillMaxWidth().animateContentSize()) {
+        Text("The band's own counter only counts while you wear it, and the phone can't change it. So BandMate sends your combined total (band + phone) to the band as a message.", style = T.Label)
+        PrimaryButton("Send today's steps now", enabled = state == Band.State.Ready, icon = Ic.Steps, modifier = Modifier.fillMaxWidth()) {
+            Actions.sendStepSummary(ctx)
+        }
+        Divider()
+        ToggleRow("Evening summary", "One message with the day's total", evening) { evening = it; StepSummary.setEveningOn(ctx, it) }
+        if (evening) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Send at", style = T.Label, modifier = Modifier.weight(1f))
+                TimeField(eveningAt) { eveningAt = it; StepSummary.setEveningTime(ctx, it) }
+            }
+        }
+        Divider()
+        ToggleRow("Hourly update", "8 am – 10 pm, only if you walked 100+ steps since the last one", hourly) {
+            hourly = it; StepSummary.setHourlyOn(ctx, it)
+        }
+        if ((evening || hourly) && bgOk == false && StepSummary.backgroundSupported(ctx)) {
+            Divider()
+            Text("To include phone steps while BandMate is closed, allow Health Connect to share them in the background.", style = T.Label)
+            Pill("Allow background access", C.Sky, icon = Ic.Phone) { askBg.launch(setOf(StepSummary.BACKGROUND_PERMISSION)) }
+        }
     }
 }

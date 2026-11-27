@@ -23,6 +23,8 @@ object Actions {
 
     fun syncNow() = scope.launch { Band.client?.syncHistory() }
 
+    fun sendStepSummary(ctx: Context) = scope.launch { StepSummary.send(ctx, "button") }
+
     /** Fetches fresh weather for the saved place and sends it to the band. */
     fun refreshWeather(ctx: Context) = scope.launch { updateWeather(ctx) }
 

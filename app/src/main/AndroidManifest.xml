@@ -20,6 +20,8 @@
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <!-- Read-only: the phone's step count from Health Connect -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <!-- So evening/hourly step summaries can include phone steps while BandMate is closed -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
 
     <!-- Weather only: fetches the forecast from open-meteo.com -->
     <uses-permission android:name="android.permission.INTERNET" />
