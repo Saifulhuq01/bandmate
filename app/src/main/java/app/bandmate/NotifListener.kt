@@ -27,6 +27,7 @@ class NotifListener : NotificationListenerService() {
         if (sbn.isOngoing || n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (n.category in SKIP_CATEGORIES) return
         if (title.isBlank() && body.isBlank()) return
+        val allowed = AppFilter.isAllowed(this, sbn.packageName)
 
         // Apps often re-post the same notification; skip repeats within 10 seconds.
         val now = System.currentTimeMillis()
@@ -34,6 +35,8 @@ class NotifListener : NotificationListenerService() {
         recent.entries.removeAll { now - it.value > 10_000 }
         if (recent.containsKey(sig)) return
         recent[sig] = now
+        AppFilter.recordSeen(this, sbn.packageName, forwarded = allowed)
+        if (!allowed) return
 
         val appName = runCatching {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString()

@@ -21,6 +21,11 @@ object Band {
     val measuringHr = MutableStateFlow(false)
     val finding = MutableStateFlow(false)
     val logLines = MutableStateFlow<List<String>>(emptyList())
+    /** History download progress 0..1, or null when not syncing. */
+    val syncing = MutableStateFlow<Float?>(null)
+    /** Bumped whenever new history lands in the database, so screens reload. */
+    val dataVersion = MutableStateFlow(0)
+    val forecast = MutableStateFlow<Forecast?>(null)
 
     @Volatile var client: BandClient? = null
 

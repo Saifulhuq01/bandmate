@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Keeps the Bluetooth connection alive in the background (shown as a quiet ongoing notification). */
@@ -37,6 +38,18 @@ class BandService : Service() {
             Band.state.collectLatest { s ->
                 val battery = Band.battery.value?.let { " · ${it.percent}%" } ?: ""
                 nm.notify(NOTIF_ID, buildNotification(s.label + battery))
+            }
+        }
+        // After each (re)connect: push settings/alarms, pull history, send weather; then hourly.
+        scope.launch {
+            Band.state.collectLatest { s ->
+                if (s != Band.State.Ready) return@collectLatest
+                delay(2_000)
+                Actions.housekeeping(applicationContext, firstAfterConnect = true)
+                while (true) {
+                    delay(60 * 60 * 1000L)
+                    Actions.housekeeping(applicationContext, firstAfterConnect = false)
+                }
             }
         }
     }

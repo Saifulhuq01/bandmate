@@ -13,6 +13,7 @@ import android.content.Context
 import android.os.Build
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -40,6 +41,12 @@ class BandClient(
     private val opLock = Mutex()
     @Volatile private var pending: CompletableDeferred<ByteArray?>? = null
     private var reconnectJob: Job? = null
+    private val syncLock = Mutex()
+    private val control = Channel<ByteArray>(Channel.UNLIMITED)
+    private val fetchBuf = java.io.ByteArrayOutputStream()
+    @Volatile private var fetchCounter = -1
+    @Volatile private var fetchOk = true
+    @Volatile private var fetchExpected = 1
     private var findJob: Job? = null
 
     fun connect(autoConnect: Boolean = false) {
@@ -221,6 +228,9 @@ class BandClient(
                 Band.measuringHr.value = false
                 Band.log("Heart rate: $it bpm")
             }
+            Uuids.ACTIVITY_CONTROL -> control.trySend(v)
+            Uuids.ACTIVITY_DATA -> onHistoryPacket(v)
+            Uuids.CONFIG -> if (v.size >= 3 && v[2].toInt() != 1) Band.log("Band refused setting: ${Proto.hex(v)}")
             Uuids.DEVICE_EVENT -> when (v.firstOrNull()) {
                 Proto.EVENT_CALL_REJECT -> { Band.log("Reject tapped on band"); Band.onRejectCall?.invoke() }
                 Proto.EVENT_CALL_IGNORE -> Band.log("Ignore tapped on band")
@@ -256,6 +266,7 @@ class BandClient(
         subscribe(Uuids.STEPS)
         subscribe(Uuids.HR_MEASURE)
         subscribe(Uuids.DEVICE_EVENT)
+        subscribe(Uuids.CONFIG)
         read(Uuids.BATTERY)?.let { Proto.parseBattery(it) }?.let { Band.battery.value = it }
         read(Uuids.STEPS)?.let { Proto.parseActivity(it) }?.let { Band.activity.value = it }
         Band.setState(Band.State.Ready)
@@ -316,10 +327,108 @@ class BandClient(
         Band.log(if (ok) "Sent: $appName — ${title.take(24)}" else "Failed to send $appName notification")
     }
 
-    private suspend fun sendChunked(payload: ByteArray): Boolean {
+    private suspend fun sendChunked(payload: ByteArray, type: Int = 0): Boolean {
         var ok = true
-        for (chunk in Proto.chunks(0, payload, mtu)) ok = ok && write(Uuids.CHUNKED, chunk)
+        for (chunk in Proto.chunks(type, payload, mtu)) ok = ok && write(Uuids.CHUNKED, chunk)
         return ok
+    }
+
+    // --- Settings, alarms, weather -----------------------------------------------------------
+
+    /** Pushes every band setting. Returns false if any write failed. */
+    suspend fun applySettings(settings: BandSettings): Boolean {
+        if (!ready) return false
+        var failed = 0
+        for ((target, bytes) in settings.commands()) {
+            val uuid = when (target) { "user" -> Uuids.USER_SETTINGS; "hr" -> Uuids.HR_CONTROL; else -> Uuids.CONFIG }
+            if (!write(uuid, bytes)) failed++
+        }
+        Band.log(if (failed == 0) "Band settings applied" else "$failed band settings failed")
+        return failed == 0
+    }
+
+    /** Writes all 10 alarm slots, so the band holds exactly [alarms]. */
+    suspend fun applyAlarms(alarms: List<Alarm>): Boolean {
+        if (!ready) return false
+        var ok = true
+        for (slot in 0 until 10) {
+            val a = alarms.firstOrNull { it.slot == slot }
+            val bytes = if (a != null) Cmd.alarm(slot, a.enabled, a.time, a.days)
+            else Cmd.alarm(slot, false, Clock(0), 0, used = false)
+            ok = write(Uuids.CONFIG, bytes) && ok
+        }
+        Band.log(if (ok) "Alarms saved on band (${alarms.count { it.enabled }} on)" else "Some alarms failed to save")
+        return ok
+    }
+
+    suspend fun sendWeather(f: Forecast): Boolean {
+        if (!ready) return false
+        var ok = true
+        for (p in WeatherApi.payloads(f)) ok = sendChunked(p, type = 1) && ok
+        Band.log(if (ok) "Weather sent: ${f.tempNow}° ${WeatherApi.label(f.codeNow)}, ${f.place}" else "Weather send failed")
+        return ok
+    }
+
+    // --- Step & sleep history ----------------------------------------------------------------
+
+    private fun onHistoryPacket(v: ByteArray) {
+        if (v.isEmpty()) return
+        synchronized(fetchBuf) {
+            val counter = v[0].toInt() and 0xff
+            if (counter == ((fetchCounter + 1) and 0xff)) {
+                fetchCounter = counter
+                fetchBuf.write(v, 1, v.size - 1)
+                Band.syncing.value = (fetchBuf.size().toFloat() / fetchExpected).coerceIn(0f, 1f)
+            } else {
+                fetchOk = false
+            }
+        }
+    }
+
+    /**
+     * Downloads minute-by-minute data (steps, sleep, heart rate) recorded since the last sync.
+     * Data is left on the band (no "delete" ack), so Zepp Life could still read it later.
+     */
+    suspend fun syncHistory(): Boolean = syncLock.withLock {
+        if (!ready) return false
+        Band.syncing.value = 0f
+        try {
+            if (!subscribe(Uuids.ACTIVITY_CONTROL) || !subscribe(Uuids.ACTIVITY_DATA)) return false
+            val store = Store.get(ctx)
+            val now = System.currentTimeMillis()
+            var from = Saved.lastSync(ctx).takeIf { it > 0 } ?: (now - 30L * 24 * 3600 * 1000)
+            var total = 0
+            repeat(12) {
+                while (control.tryReceive().isSuccess) { /* drop stale replies */ }
+                if (!write(Uuids.ACTIVITY_CONTROL, Fetch.request(from))) return false
+                val reply = withTimeoutOrNull(15_000) { control.receive() } ?: run { Band.log("Sync: no reply"); return false }
+                val start = Fetch.parseStart(reply) ?: run { Band.log("Sync refused: ${Proto.hex(reply)}"); return false }
+                if (start.bytes == 0) {
+                    Band.log(if (total == 0) "History up to date" else "Synced $total minutes of history")
+                    return true
+                }
+                synchronized(fetchBuf) { fetchBuf.reset(); fetchCounter = -1; fetchOk = true; fetchExpected = start.bytes }
+                if (!write(Uuids.ACTIVITY_CONTROL, Fetch.START_TRANSFER)) return false
+                val end = withTimeoutOrNull(180_000) { control.receive() } ?: run { Band.log("Sync timed out"); return false }
+                val data = synchronized(fetchBuf) { fetchBuf.toByteArray() }
+                if (!fetchOk || Fetch.isFailure(end)) { Band.log("Sync broke off: ${Proto.hex(end)}"); return false }
+                val samples = Fetch.parseSamples(data)
+                val startMinute = start.startMillis / 60_000
+                store.insert(startMinute, samples)
+                total += samples.size
+                from = (startMinute + samples.size) * 60_000
+                Saved.setLastSync(ctx, from)
+                Band.dataVersion.value++
+                if (samples.isEmpty() || from >= System.currentTimeMillis() - 60_000) {
+                    Band.log("Synced $total minutes of history")
+                    return true
+                }
+            }
+            Band.log("Synced $total minutes of history")
+            true
+        } finally {
+            Band.syncing.value = null
+        }
     }
 
     fun sendCall(caller: String) = scope.launch {

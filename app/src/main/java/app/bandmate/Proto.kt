@@ -15,6 +15,10 @@ object Uuids {
     private fun huami(n: String) = UUID.fromString("0000$n-0000-3512-2118-0009af100700")
 
     val AUTH: UUID = huami("0009")
+    val CONFIG: UUID = huami("0003")
+    val ACTIVITY_CONTROL: UUID = huami("0004")
+    val ACTIVITY_DATA: UUID = huami("0005")
+    val USER_SETTINGS: UUID = huami("0008")
     val BATTERY: UUID = huami("0006")
     val STEPS: UUID = huami("0007")
     val DEVICE_EVENT: UUID = huami("0010")

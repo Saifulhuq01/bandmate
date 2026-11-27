@@ -46,4 +46,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // real org.json for JVM unit tests
 }
