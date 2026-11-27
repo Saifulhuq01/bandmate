@@ -137,8 +137,12 @@ fun TodayScreen(onOpenSleep: () -> Unit, onOpenBand: () -> Unit) {
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MiniStat(Ic.Route, C.Sky, activity?.let { "%.2f".format(it.meters / 1000.0) } ?: "—", "km", Modifier.weight(1f))
-                MiniStat(Ic.Flame, C.Awake, activity?.kcal?.toString() ?: "—", "kcal", Modifier.weight(1f))
+                // The band only knows its own steps; when the phone counted more, estimate from the total
+                // (about 0.75 m and 0.04 kcal per step).
+                val meters = maxOf(activity?.meters ?: 0, (steps * 0.75).toInt())
+                val kcal = maxOf(activity?.kcal ?: 0, (steps * 0.04).toInt())
+                MiniStat(Ic.Route, C.Sky, if (steps > 0 || activity != null) "%.2f".format(meters / 1000.0) else "—", "km", Modifier.weight(1f))
+                MiniStat(Ic.Flame, C.Awake, if (steps > 0 || activity != null) kcal.toString() else "—", "kcal", Modifier.weight(1f))
                 MiniStat(if (battery?.charging == true) Ic.Bolt else Ic.Battery, C.Text, battery?.percent?.toString() ?: "—", "%", Modifier.weight(1f))
             }
         }

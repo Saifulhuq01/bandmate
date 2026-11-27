@@ -184,25 +184,32 @@ fun SleepBars(nights: List<Night?>, labels: List<String?>, selected: Int?, onSel
     }
 }
 
-/** Heart rate over a day as a soft line. Values of 0 or 255 are gaps. */
+/** Heart rate over a day: readings averaged into 15-minute blocks and drawn as a smooth line. */
 @Composable
 fun HeartLine(points: List<Pair<Float, Int>>, modifier: Modifier = Modifier, height: Dp = 90.dp) {
     val reveal = remember { Animatable(0f) }
     LaunchedEffect(points) { reveal.snapTo(0f); reveal.animateTo(1f, tween(900)) }
-    val valid = points.filter { it.second in 30..220 }
-    if (valid.size < 10) return // too few readings to draw a meaningful line
-    // Keep at least a 50 bpm window so small wobbles don't look like spikes.
-    val mid = (valid.minOf { it.second } + valid.maxOf { it.second }) / 2f
-    val half = maxOf(25f, (valid.maxOf { it.second } - valid.minOf { it.second }) / 2f + 5)
-    val lo = mid - half
-    val hi = mid + half
+    val bins = 96
+    val avg = remember(points) {
+        val sum = IntArray(bins); val n = IntArray(bins)
+        points.forEach { (x, v) ->
+            if (v in 30..220) { val b = (x * bins).toInt().coerceIn(0, bins - 1); sum[b] += v; n[b]++ }
+        }
+        List(bins) { if (n[it] > 0) sum[it].toFloat() / n[it] else null }
+    }
+    val present = avg.filterNotNull()
+    if (present.size < 3) return // not enough readings yet
+    val mid = (present.min() + present.max()) / 2f
+    val half = maxOf(25f, (present.max() - present.min()) / 2f + 5)
     Canvas(modifier.fillMaxWidth().height(height)) {
-        var prev: Offset? = null
-        valid.forEach { (x, v) ->
-            if (x > reveal.value) return@forEach
-            val p = Offset(x * size.width, size.height * (1 - (v - lo) / (hi - lo)))
-            prev?.let { if (p.x - it.x < size.width * 0.03f) drawLine(C.Heart, it, p, 2.dp.toPx(), StrokeCap.Round) }
-            prev = p
+        fun pt(i: Int, v: Float) = Offset((i + 0.5f) / bins * size.width, size.height * (1 - (v - (mid - half)) / (2 * half)))
+        var prev: Pair<Int, Float>? = null
+        avg.forEachIndexed { i, v ->
+            if (v == null || (i + 0.5f) / bins > reveal.value) return@forEachIndexed
+            val p = prev
+            if (p != null && i - p.first <= 2) drawLine(C.Heart, pt(p.first, p.second), pt(i, v), 2.5.dp.toPx(), StrokeCap.Round)
+            else drawCircle(C.Heart, 2.dp.toPx(), pt(i, v))
+            prev = i to v
         }
     }
 }
