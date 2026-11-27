@@ -9,8 +9,9 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * Puts today's combined (band + phone) step count on the band as a message, because the band's
- * own counter can't be changed from the phone. Sent on demand, every evening, and optionally hourly.
+ * Puts today's combined (band + phone) step count on your wrist as a message, because a watch's
+ * own counter can't be changed from the phone. Goes to the Mi Band directly and, as a phone
+ * notification, to watches like boAt (via their own app). Sent on demand, every evening, and hourly.
  */
 object StepSummary {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("summary", Context.MODE_PRIVATE)
@@ -67,14 +68,60 @@ object StepSummary {
     }
 
     /** Sends the summary now. Returns false if the band isn't connected. */
+    /**
+     * Sends the summary now: to the Mi Band (if connected) and, if enabled, as a phone notification
+     * that watch apps like boAt Crest forward to their watches. Returns false if it went nowhere.
+     */
     suspend fun send(ctx: Context, reason: String): Boolean {
-        val client = Band.client ?: return false
-        if (Band.state.value != Band.State.Ready) return false
         val t = today(ctx)
         val (title, body) = message(t, Saved.settings(ctx).stepGoal)
-        client.sendNotification(ctx.packageName, "BandMate", title, body).join()
-        prefs(ctx).edit().putInt("lastSentSteps", t.merged).putString("lastSentDay", LocalDate.now().toString()).apply()
-        Band.log("Step summary ($reason): ${t.merged} steps")
+        var delivered = false
+        if (phoneNotifyOn(ctx)) delivered = postPhoneNotification(ctx, title, body)
+        val client = Band.client
+        if (client != null && Band.state.value == Band.State.Ready) {
+            client.sendNotification(ctx.packageName, "BandMate", title, body).join()
+            delivered = true
+        }
+        if (delivered) {
+            prefs(ctx).edit().putInt("lastSentSteps", t.merged).putString("lastSentDay", LocalDate.now().toString()).apply()
+            Band.log("Step summary ($reason): ${t.merged} steps")
+        }
+        return delivered
+    }
+
+    // --- Phone notification (picked up by Crest and other watch apps) --------------------------
+
+    fun phoneNotifyOn(ctx: Context) = prefs(ctx).getBoolean("phoneNotify", true)
+    fun setPhoneNotifyOn(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("phoneNotify", on).apply()
+
+    private const val CHANNEL = "steps"
+    private const val NOTIF_ID = 42
+
+    private fun postPhoneNotification(ctx: Context, title: String, body: String): Boolean {
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java) ?: return false
+        if (!nm.areNotificationsEnabled()) return false
+        // Default importance (so watch apps forward it) but no sound, so the phone itself stays quiet.
+        nm.createNotificationChannel(
+            android.app.NotificationChannel(CHANNEL, "Step summary", android.app.NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Your combined step total, for watches like boAt that show phone notifications"
+                setSound(null, null)
+                enableVibration(false)
+            }
+        )
+        val open = android.app.PendingIntent.getActivity(
+            ctx, 0, android.content.Intent(ctx, MainActivity::class.java), android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val n = android.app.Notification.Builder(ctx, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle(title)
+            .setContentText(body.replace("\n", " · "))
+            .setStyle(android.app.Notification.BigTextStyle().bigText(body))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        // Remove the previous one first so watch apps see a fresh notification, not a silent update.
+        nm.cancel(NOTIF_ID)
+        nm.notify(NOTIF_ID, n)
         return true
     }
 

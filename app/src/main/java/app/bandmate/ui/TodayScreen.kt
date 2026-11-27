@@ -136,11 +136,11 @@ fun TodayScreen(onOpenSleep: () -> Unit, onOpenBand: () -> Unit) {
                     Dot(C.Sky); Spacer(Modifier.width(6.dp)); Text("Phone %,d".format(phoneSteps), style = T.Label)
                 }
             }
-            if (state == Band.State.Ready) {
+            run {
                 var sent by remember { mutableStateOf(false) }
                 LaunchedEffect(sent) { if (sent) { delay(2500); sent = false } }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    Pill(if (sent) "Sent to band" else "Show this total on the band", C.Steps, icon = if (sent) Ic.Check else Ic.Band) {
+                    Pill(if (sent) "Sent to band" else "Show this total on my watch", C.Steps, icon = if (sent) Ic.Check else Ic.Band) {
                         if (!sent) { Actions.sendStepSummary(ctx); sent = true }
                     }
                 }

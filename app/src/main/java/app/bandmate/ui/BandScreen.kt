@@ -447,8 +447,13 @@ private fun StepSummaryCard() {
 
     Card(Modifier.fillMaxWidth().animateContentSize()) {
         Text("The band's own counter only counts while you wear it, and the phone can't change it. So BandMate sends your combined total (band + phone) to the band as a message.", style = T.Label)
-        PrimaryButton("Send today's steps now", enabled = state == Band.State.Ready, icon = Ic.Steps, modifier = Modifier.fillMaxWidth()) {
+        PrimaryButton("Send today's steps now", icon = Ic.Steps, modifier = Modifier.fillMaxWidth()) {
             Actions.sendStepSummary(ctx)
+        }
+        Divider()
+        var phoneNotify by remember { mutableStateOf(StepSummary.phoneNotifyOn(ctx)) }
+        ToggleRow("Also send to boAt and other watches", "Posted as a quiet phone notification — Crest forwards it to your boAt watch", phoneNotify, accent = C.Sky) {
+            phoneNotify = it; StepSummary.setPhoneNotifyOn(ctx, it)
         }
         Divider()
         ToggleRow("Evening summary", "One message with the day's total", evening) { evening = it; StepSummary.setEveningOn(ctx, it) }

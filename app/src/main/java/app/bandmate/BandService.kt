@@ -40,16 +40,14 @@ class BandService : Service() {
                 nm.notify(NOTIF_ID, buildNotification(s.label + battery))
             }
         }
-        // Step summaries: check once a minute while connected.
+        // Step summaries: check once a minute for as long as BandMate runs — even when the Mi Band
+        // is away, because the phone notification still reaches other watches (boAt via Crest).
         scope.launch {
-            Band.state.collectLatest { s ->
-                if (s != Band.State.Ready) return@collectLatest
-                delay(10_000) // let the connect-time sync finish first
-                while (true) {
-                    runCatching { StepSummary.tick(applicationContext) }
-                        .onFailure { Band.log("Step summary failed: ${it.message}") }
-                    delay(60_000L - System.currentTimeMillis() % 60_000L)
-                }
+            delay(15_000) // let the connect-time sync finish first
+            while (true) {
+                runCatching { StepSummary.tick(applicationContext) }
+                    .onFailure { Band.log("Step summary failed: ${it.message}") }
+                delay(60_000L - System.currentTimeMillis() % 60_000L)
             }
         }
         // After each (re)connect: push settings/alarms, pull history, send weather; then hourly.
